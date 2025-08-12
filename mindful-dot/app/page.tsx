@@ -1,4 +1,11 @@
 "use client";
+// TS: add legacy webkit type without using `any`
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Settings, Play, Pause, RotateCcw } from "lucide-react";
@@ -39,10 +46,8 @@ function playChime(
   { volume = 0.4, freq = 432, duration = 0.22 }: { volume?: number; freq?: number; duration?: number } = {}
 ) {
   try {
-    // TS-friendly: cast window to any for the webkit fallback
-    const AC =
-      (window as any).AudioContext ||
-      (window as any).webkitAudioContext;
+    const AC: typeof AudioContext | undefined =
+      window.AudioContext ?? window.webkitAudioContext;
     if (!AC) return;
 
     const ctx = new AC();
@@ -60,9 +65,10 @@ function playChime(
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     osc.stop(ctx.currentTime + duration + 0.02);
   } catch {
-    // ignore audio errors (e.g., user gesture not given yet)
+    // ignore audio errors
   }
 }
+
 
 
 const phases = [
