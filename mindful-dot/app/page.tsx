@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
 // Helper: format seconds -> mm:ss
-const fmt = (s) => {
+const fmt = (s:number): string => {
   const m = Math.floor(s / 60)
     .toString()
     .padStart(2, "0");
@@ -49,7 +49,7 @@ function playChime({ volume = 0.4, freq = 432, duration = 0.22 } = {}) {
     osc.start();
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     osc.stop(ctx.currentTime + duration + 0.02);
-  } catch (_) {}
+  } catch (_unused) {}
 }
 
 const phases = [
@@ -76,12 +76,6 @@ export default function MindfulBreathingDotApp() {
   const phaseDurations = useMemo(
     () => [settings.inhale, settings.hold1, settings.exhale, settings.hold2],
     [settings]
-  );
-
-  // Total cycle duration
-  const cycleDuration = useMemo(
-    () => phaseDurations.reduce((a, b) => a + b, 0) || 1,
-    [phaseDurations]
   );
 
   // Progress percent (cycles vs goal)
