@@ -35,22 +35,35 @@ const DEFAULTS = {
 };
 
 // WebAudio chime (simple sine beep)
-function playChime({ volume = 0.4, freq = 432, duration = 0.22 } = {}) {
+function playChime(
+  { volume = 0.4, freq = 432, duration = 0.22 }: { volume?: number; freq?: number; duration?: number } = {}
+) {
   try {
-    const AC = window.AudioContext || window.webkitAudioContext;
+    // TS-friendly: cast window to any for the webkit fallback
+    const AC =
+      (window as any).AudioContext ||
+      (window as any).webkitAudioContext;
+    if (!AC) return;
+
     const ctx = new AC();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+
     osc.frequency.value = freq;
     osc.type = "sine";
     gain.gain.value = volume;
+
     osc.connect(gain);
     gain.connect(ctx.destination);
+
     osc.start();
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     osc.stop(ctx.currentTime + duration + 0.02);
-  } catch (_unused) {}
+  } catch {
+    // ignore audio errors (e.g., user gesture not given yet)
+  }
 }
+
 
 const phases = [
   { key: "inhale", label: "Inhale" },
