@@ -1,47 +1,70 @@
 "use client";
-// TS: add legacy webkit type without using `any`
+
+// Add legacy webkit audio context typing without using `any`
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
   }
 }
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  PropsWithChildren,
+} from "react";
 import { motion } from "framer-motion";
 import { Settings, Play, Pause, RotateCcw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
-// Helper: format seconds -> mm:ss
-const fmt = (s:number): string => {
-  const m = Math.floor(s / 60)
-    .toString()
-    .padStart(2, "0");
-  const ss = Math.floor(s % 60)
-    .toString()
-    .padStart(2, "0");
+/* -------------------- Utils -------------------- */
+
+const fmt = (s: number): string => {
+  const m = Math.floor(s / 60).toString().padStart(2, "0");
+  const ss = Math.floor(s % 60).toString().padStart(2, "0");
   return `${m}:${ss}`;
 };
 
-// Default settings
-const DEFAULTS = {
-  inhale: 4, // seconds
+type SettingsState = {
+  inhale: number;
+  hold1: number;
+  exhale: number;
+  hold2: number;
+  dotMin: number;
+  dotMax: number;
+  cyclesGoal: number;
+  chimeOnPhaseChange: boolean;
+  chimeOnCycle: boolean;
+  volume: number; // 0..1
+};
+
+const DEFAULTS: SettingsState = {
+  inhale: 4,
   hold1: 0,
   exhale: 6,
   hold2: 0,
-  dotMin: 40, // px
-  dotMax: 160, // px
+  dotMin: 40,
+  dotMax: 160,
   cyclesGoal: 20,
   chimeOnPhaseChange: false,
   chimeOnCycle: true,
   volume: 0.4,
 };
 
-// WebAudio chime (simple sine beep)
+// WebAudio chime (simple sine beep) with strict TS types
 function playChime(
   { volume = 0.4, freq = 432, duration = 0.22 }: { volume?: number; freq?: number; duration?: number } = {}
 ) {
@@ -65,60 +88,63 @@ function playChime(
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     osc.stop(ctx.currentTime + duration + 0.02);
   } catch {
-    // ignore audio errors
+    // ignore audio errors (e.g., user gesture not granted yet)
   }
 }
 
-
+/* -------------------- Phases -------------------- */
 
 const phases = [
   { key: "inhale", label: "Inhale" },
   { key: "hold1", label: "Hold" },
   { key: "exhale", label: "Exhale" },
   { key: "hold2", label: "Hold" },
-];
+] as const;
 
-export default function MindfulBreathingDotApp() {
-  const containerRef = useRef(null);
-  const [running, setRunning] = useState(false);
-  const [settings, setSettings] = useState(DEFAULTS);
-  const [phaseIndex, setPhaseIndex] = useState(0);
-  const [phaseRemaining, setPhaseRemaining] = useState(DEFAULTS.inhale);
-  const [cycles, setCycles] = useState(0);
-  const [sessionSeconds, setSessionSeconds] = useState(0);
-  const sessionStartRef = useRef(null);
+type PhaseKey = typeof phases[number]["key"];
+
+/* -------------------- Main Component -------------------- */
+
+export default function Focus() {
+  // Typed container ref (fixes getBoundingClientRect error)
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const [running, setRunning] = useState<boolean>(false);
+  const [settings, setSettings] = useState<SettingsState>({ ...DEFAULTS });
+
+  const [phaseIndex, setPhaseIndex] = useState<number>(0);
+  const [phaseRemaining, setPhaseRemaining] = useState<number>(DEFAULTS.inhale);
+  const [cycles, setCycles] = useState<number>(0);
+
+  const [sessionSeconds, setSessionSeconds] = useState<number>(0);
+  const sessionStartRef = useRef<number | null>(null);
 
   // dot position stored in % to keep it responsive
-  const [dotPos, setDotPos] = useState({ x: 50, y: 50 });
+  const [dotPos, setDotPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
 
   // Recompute phase durations from settings
-  const phaseDurations = useMemo(
+  const phaseDurations = useMemo<number[]>(
     () => [settings.inhale, settings.hold1, settings.exhale, settings.hold2],
     [settings]
   );
 
   // Progress percent (cycles vs goal)
-  const progressPct = Math.min(100, Math.round((cycles / Math.max(1, settings.cyclesGoal)) * 100));
+  const progressPct = Math.min(
+    100,
+    Math.round((cycles / Math.max(1, settings.cyclesGoal)) * 100)
+  );
 
   // Dot size animation for the current phase
-  const dotScale = useMemo(() => {
+  const dotScale = useMemo<{ from: number; to: number }>(() => {
     const min = settings.dotMin;
     const max = settings.dotMax;
-    switch (phases[phaseIndex].key) {
-      case "inhale":
-        return { from: min, to: max };
-      case "exhale":
-        return { from: max, to: min };
-      default:
-        // hold phases maintain current size based on surrounding phases
-        if (phaseIndex === 1) {
-          return { from: settings.dotMax, to: settings.dotMax };
-        }
-        if (phaseIndex === 3) {
-          return { from: settings.dotMin, to: settings.dotMin };
-        }
-        return { from: min, to: min };
-    }
+    const k: PhaseKey = phases[phaseIndex].key;
+
+    if (k === "inhale") return { from: min, to: max };
+    if (k === "exhale") return { from: max, to: min };
+    if (k === "hold1") return { from: max, to: max };
+    if (k === "hold2") return { from: min, to: min };
+    return { from: min, to: min };
   }, [phaseIndex, settings.dotMin, settings.dotMax]);
 
   // Move dot to a random safe position inside the container
@@ -156,7 +182,7 @@ export default function MindfulBreathingDotApp() {
 
   // Keyboard: Space to toggle
   useEffect(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         e.preventDefault();
         toggle();
@@ -170,12 +196,14 @@ export default function MindfulBreathingDotApp() {
   useEffect(() => {
     if (!running) return;
 
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       // Session time
       setSessionSeconds((s) => s + 1);
+
       // Phase countdown second-wise
       setPhaseRemaining((t) => {
         if (t > 1) return t - 1;
+
         // Phase complete -> advance
         setPhaseIndex((idx) => {
           const nextIdx = (idx + 1) % phases.length;
@@ -197,12 +225,20 @@ export default function MindfulBreathingDotApp() {
           setPhaseRemaining(phaseDurations[nextIdx] || 1);
           return nextIdx;
         });
+
         return 1; // will be replaced immediately
       });
     }, 1000);
 
-    return () => clearInterval(interval);
-  }, [running, moveDotRandom, phaseDurations, settings.chimeOnPhaseChange, settings.chimeOnCycle, settings.volume]);
+    return () => window.clearInterval(interval);
+  }, [
+    running,
+    moveDotRandom,
+    phaseDurations,
+    settings.chimeOnPhaseChange,
+    settings.chimeOnCycle,
+    settings.volume,
+  ]);
 
   // If a phase duration is 0, auto-skip it while running
   useEffect(() => {
@@ -214,13 +250,12 @@ export default function MindfulBreathingDotApp() {
     }
   }, [running, phaseDurations, phaseIndex]);
 
-  // Compute animation duration for the current phase (seconds)
+  // Animation duration (seconds)
   const currentPhaseSeconds = Math.max(0.01, phaseDurations[phaseIndex] || 0.01);
-
-  // Progress bar width style
-  const progressStyle = { width: `${progressPct}%` };
-
+  const progressStyle: React.CSSProperties = { width: `${progressPct}%` };
   const phaseLabel = phases[phaseIndex].label;
+
+  /* -------------------- UI -------------------- */
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center">
@@ -230,7 +265,9 @@ export default function MindfulBreathingDotApp() {
           <div className="h-8 w-8 rounded-xl bg-slate-800/70 border border-slate-700 grid place-items-center">🎯</div>
           <div>
             <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">Focus</h1>
-            <p className="text-xs sm:text-sm text-slate-400">Focus your gaze. Sync your breath. Settle your mind.</p>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Focus your gaze. Sync your breath. Settle your mind.
+            </p>
           </div>
         </div>
 
@@ -251,16 +288,28 @@ export default function MindfulBreathingDotApp() {
               {/* Phase durations */}
               <Section title="Breath Phases (seconds)">
                 <Row label="Inhale">
-                  <SecondsSlider value={settings.inhale} onChange={(v) => setSettings((s) => ({ ...s, inhale: v }))} />
+                  <SecondsSlider
+                    value={settings.inhale}
+                    onChange={(v) => setSettings((s) => ({ ...s, inhale: v }))}
+                  />
                 </Row>
                 <Row label="Hold 1">
-                  <SecondsSlider value={settings.hold1} onChange={(v) => setSettings((s) => ({ ...s, hold1: v }))} />
+                  <SecondsSlider
+                    value={settings.hold1}
+                    onChange={(v) => setSettings((s) => ({ ...s, hold1: v }))}
+                  />
                 </Row>
                 <Row label="Exhale">
-                  <SecondsSlider value={settings.exhale} onChange={(v) => setSettings((s) => ({ ...s, exhale: v }))} />
+                  <SecondsSlider
+                    value={settings.exhale}
+                    onChange={(v) => setSettings((s) => ({ ...s, exhale: v }))}
+                  />
                 </Row>
                 <Row label="Hold 2">
-                  <SecondsSlider value={settings.hold2} onChange={(v) => setSettings((s) => ({ ...s, hold2: v }))} />
+                  <SecondsSlider
+                    value={settings.hold2}
+                    onChange={(v) => setSettings((s) => ({ ...s, hold2: v }))}
+                  />
                 </Row>
               </Section>
 
@@ -268,9 +317,10 @@ export default function MindfulBreathingDotApp() {
               <Section title="Calming Dot Size (px)">
                 <Row label={`Min (${settings.dotMin}px)`}>
                   <Slider
-                    defaultValue={[settings.dotMin]}
                     value={[settings.dotMin]}
-                    onValueChange={([v]) => setSettings((s) => ({ ...s, dotMin: Math.min(v, s.dotMax - 10) }))}
+                    onValueChange={([v]) =>
+                      setSettings((s) => ({ ...s, dotMin: Math.min(v, s.dotMax - 10) }))
+                    }
                     min={24}
                     max={220}
                     step={2}
@@ -278,9 +328,10 @@ export default function MindfulBreathingDotApp() {
                 </Row>
                 <Row label={`Max (${settings.dotMax}px)`}>
                   <Slider
-                    defaultValue={[settings.dotMax]}
                     value={[settings.dotMax]}
-                    onValueChange={([v]) => setSettings((s) => ({ ...s, dotMax: Math.max(v, s.dotMin + 10) }))}
+                    onValueChange={([v]) =>
+                      setSettings((s) => ({ ...s, dotMax: Math.max(v, s.dotMin + 10) }))
+                    }
                     min={40}
                     max={300}
                     step={2}
@@ -292,7 +343,6 @@ export default function MindfulBreathingDotApp() {
               <Section title="Session Goal">
                 <Row label={`Cycles Goal (${settings.cyclesGoal})`}>
                   <Slider
-                    defaultValue={[settings.cyclesGoal]}
                     value={[settings.cyclesGoal]}
                     onValueChange={([v]) => setSettings((s) => ({ ...s, cyclesGoal: v }))}
                     min={5}
@@ -307,18 +357,21 @@ export default function MindfulBreathingDotApp() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <ToggleRow
                     checked={settings.chimeOnPhaseChange}
-                    onCheckedChange={(val) => setSettings((s) => ({ ...s, chimeOnPhaseChange: val }))}
+                    onCheckedChange={(val) =>
+                      setSettings((s) => ({ ...s, chimeOnPhaseChange: val }))
+                    }
                     label="Chime on phase change"
                   />
                   <ToggleRow
                     checked={settings.chimeOnCycle}
-                    onCheckedChange={(val) => setSettings((s) => ({ ...s, chimeOnCycle: val }))}
+                    onCheckedChange={(val) =>
+                      setSettings((s) => ({ ...s, chimeOnCycle: val }))
+                    }
                     label="Chime at end of cycle"
                   />
                 </div>
                 <Row label={`Volume (${Math.round(settings.volume * 100)}%)`}>
                   <Slider
-                    defaultValue={[settings.volume * 100]}
                     value={[settings.volume * 100]}
                     onValueChange={([v]) => setSettings((s) => ({ ...s, volume: v / 100 }))}
                     min={0}
@@ -329,7 +382,11 @@ export default function MindfulBreathingDotApp() {
               </Section>
 
               <div className="flex items-center justify-between pt-2">
-                <Button variant="secondary" className="bg-slate-800 border border-slate-700" onClick={() => setSettings(DEFAULTS)}>
+                <Button
+                  variant="secondary"
+                  className="bg-slate-800 border border-slate-700"
+                  onClick={() => setSettings({ ...DEFAULTS })}
+                >
                   Restore Defaults
                 </Button>
                 <Button variant="outline" className="border-slate-600" onClick={resetAll}>
@@ -349,20 +406,37 @@ export default function MindfulBreathingDotApp() {
             <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-3 justify-between">
               <div className="flex items-center gap-4">
                 <Badge label={`Phase: ${phaseLabel}`} />
-                <Badge label={`Phase Left: ${phaseDurations[phaseIndex] ? phaseRemaining + "s" : "—"}`} subtle />
+                <Badge
+                  label={`Phase Left: ${
+                    phaseDurations[phaseIndex] ? `${phaseRemaining}s` : "—"
+                  }`}
+                  subtle
+                />
                 <Badge label={`Cycle: ${cycles}/${settings.cyclesGoal}`} subtle />
               </div>
               <div className="flex items-center gap-2">
                 <Badge label={`Session: ${fmt(sessionSeconds)}`} />
                 <Button size="sm" onClick={toggle} className="ml-1">
                   {running ? (
-                    <span className="inline-flex items-center"><Pause className="h-4 w-4 mr-1"/>Pause</span>
+                    <span className="inline-flex items-center">
+                      <Pause className="h-4 w-4 mr-1" />
+                      Pause
+                    </span>
                   ) : (
-                    <span className="inline-flex items-center"><Play className="h-4 w-4 mr-1"/>Start</span>
+                    <span className="inline-flex items-center">
+                      <Play className="h-4 w-4 mr-1" />
+                      Start
+                    </span>
                   )}
                 </Button>
-                <Button size="sm" variant="secondary" className="bg-slate-800 border border-slate-700" onClick={resetAll}>
-                  <RotateCcw className="h-4 w-4 mr-1"/>Reset
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="bg-slate-800 border border-slate-700"
+                  onClick={resetAll}
+                >
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  Reset
                 </Button>
               </div>
             </div>
@@ -400,13 +474,10 @@ export default function MindfulBreathingDotApp() {
                   height: dotScale.from,
                 }}
                 transition={{ duration: currentPhaseSeconds, ease: "easeInOut" }}
-                style={{
-                  translateX: "-50%",
-                  translateY: "-50%",
-                }}
+                style={{ translateX: "-50%", translateY: "-50%" }}
               />
 
-              {/* Center helpful caption */}
+              {/* Caption */}
               <div className="absolute bottom-6 w-full flex items-center justify-center text-slate-300 text-sm">
                 <p className="px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/70 backdrop-blur-sm">
                   Gently {phaseLabel.toLowerCase()}… keep your eyes on the dot
@@ -418,15 +489,20 @@ export default function MindfulBreathingDotApp() {
 
         {/* Footnote */}
         <div className="text-center text-xs text-slate-500 mt-3">
-          Tip: Press <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded">Space</kbd> to start/pause
+          Tip: Press{" "}
+          <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded">
+            Space
+          </kbd>{" "}
+          to start/pause
         </div>
       </div>
     </div>
   );
 }
 
-// ----- UI helpers -----
-function Section({ title, children }) {
+/* -------------------- UI helpers with types -------------------- */
+
+function Section({ title, children }: PropsWithChildren<{ title: string }>) {
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-medium text-slate-200">{title}</h3>
@@ -435,7 +511,7 @@ function Section({ title, children }) {
   );
 }
 
-function Row({ label, children }) {
+function Row({ label, children }: PropsWithChildren<{ label: string }>) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-center">
       <Label className="text-slate-300 sm:col-span-2">{label}</Label>
@@ -444,7 +520,15 @@ function Row({ label, children }) {
   );
 }
 
-function ToggleRow({ label, checked, onCheckedChange }) {
+function ToggleRow({
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-slate-700/70 bg-slate-800/40 px-3 py-2">
       <Label className="text-slate-300">{label}</Label>
@@ -453,20 +537,35 @@ function ToggleRow({ label, checked, onCheckedChange }) {
   );
 }
 
-function SecondsSlider({ value, onChange }) {
+function SecondsSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
   return (
     <div className="flex items-center gap-3">
-      <Slider value={[value]} min={0} max={20} step={1} onValueChange={([v]) => onChange(v)} className="flex-1" />
+      <Slider
+        value={[value]}
+        onValueChange={([v]) => onChange(v)}
+        min={0}
+        max={20}
+        step={1}
+        className="flex-1"
+      />
       <span className="w-10 text-right text-slate-300 tabular-nums">{value}s</span>
     </div>
   );
 }
 
-function Badge({ label, subtle = false }) {
+function Badge({ label, subtle = false }: { label: string; subtle?: boolean }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium border ${
-        subtle ? "bg-slate-800/50 border-slate-700 text-slate-300" : "bg-sky-500/15 border-sky-700/40 text-sky-300"
+        subtle
+          ? "bg-slate-800/50 border-slate-700 text-slate-300"
+          : "bg-sky-500/15 border-sky-700/40 text-sky-300"
       }`}
     >
       {label}
