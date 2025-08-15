@@ -53,9 +53,9 @@ type SettingsState = {
 
 const DEFAULTS: SettingsState = {
   inhale: 4,
-  hold1: 0,
+  hold1: 2,   // was 0
   exhale: 6,
-  hold2: 0,
+  hold2: 2,   // was 0
   dotMin: 40,
   dotMax: 160,
   cyclesGoal: 20,
@@ -118,6 +118,18 @@ export default function Focus() {
 
   const [sessionSeconds, setSessionSeconds] = useState<number>(0);
   const sessionStartRef = useRef<number | null>(null);
+
+  // one-time tutorial
+  const [showTutorial, setShowTutorial] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const seen = localStorage.getItem("focus_tutorial_seen");
+    if (!seen) setShowTutorial(true);
+  }, []);
+  const dismissTutorial = useCallback(() => {
+    try { localStorage.setItem("focus_tutorial_seen", "1"); } catch {}
+    setShowTutorial(false);
+  }, []);
 
   // dot position stored in % to keep it responsive
   const [dotPos, setDotPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
@@ -259,6 +271,26 @@ export default function Focus() {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center">
+      {/* One‑time Welcome tutorial */}
+      {showTutorial && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="max-w-lg w-full rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 p-5 shadow-xl">
+            <h2 className="text-xl font-semibold mb-3">Welcome to Focus</h2>
+            <ol className="space-y-2 text-sm text-slate-300 list-decimal pl-5">
+              <li><b>Press Start</b> to begin. The dot grows on <b>Inhale</b>, shrinks on <b>Exhale</b>.</li>
+              <li>Follow the <b>label inside the dot</b> (Inhale / Hold / Exhale).</li>
+              <li>Open the <b>gear icon</b> (top‑right) to change timings, size, volume.</li>
+              <li>Each cycle the dot <b>moves</b> to keep your eyes engaged.</li>
+            </ol>
+            <div className="mt-4 flex justify-end">
+              <Button variant="secondary" className="bg-slate-800 border border-slate-700" onClick={dismissTutorial}>
+                Got it
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="w-full max-w-5xl px-4 pt-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -456,11 +488,11 @@ export default function Focus() {
                 <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-800 w-[82%] aspect-square" />
               </div>
 
-              {/* Calming Dot */}
+              {/* Calming Dot with PHASE LABEL inside */}
               <motion.div
                 aria-label="Calming dot"
                 role="img"
-                className="absolute rounded-full shadow-2xl ring-1 ring-slate-700 bg-gradient-to-br from-sky-300 to-blue-500"
+                className="absolute rounded-full shadow-2xl ring-1 ring-slate-700 bg-gradient-to-br from-sky-300 to-blue-500 grid place-items-center"
                 animate={{
                   left: `${dotPos.x}%`,
                   top: `${dotPos.y}%`,
@@ -475,7 +507,11 @@ export default function Focus() {
                 }}
                 transition={{ duration: currentPhaseSeconds, ease: "easeInOut" }}
                 style={{ translateX: "-50%", translateY: "-50%" }}
-              />
+              >
+                <span className="select-none text-slate-900/90 font-medium text-sm sm:text-base">
+                  {phaseLabel}
+                </span>
+              </motion.div>
 
               {/* Caption */}
               <div className="absolute bottom-6 w-full flex items-center justify-center text-slate-300 text-sm">
