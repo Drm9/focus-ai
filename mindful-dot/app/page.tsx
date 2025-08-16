@@ -53,9 +53,9 @@ type SettingsState = {
 
 const DEFAULTS: SettingsState = {
   inhale: 4,
-  hold1: 2,   // was 0
+  hold1: 2,   // calmer defaults
   exhale: 6,
-  hold2: 2,   // was 0
+  hold2: 2,
   dotMin: 40,
   dotMax: 160,
   cyclesGoal: 20,
@@ -88,7 +88,7 @@ function playChime(
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
     osc.stop(ctx.currentTime + duration + 0.02);
   } catch {
-    // ignore audio errors (e.g., user gesture not granted yet)
+    // ignore audio errors (user gesture may be required before audio)
   }
 }
 
@@ -106,10 +106,11 @@ type PhaseKey = typeof phases[number]["key"];
 /* -------------------- Main Component -------------------- */
 
 export default function Focus() {
-  // Typed container ref (fixes getBoundingClientRect error)
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [running, setRunning] = useState<boolean>(false);
+  // ⏯️ Auto-start: start running as soon as the page loads
+  const [running, setRunning] = useState<boolean>(true);
+
   const [settings, setSettings] = useState<SettingsState>({ ...DEFAULTS });
 
   const [phaseIndex, setPhaseIndex] = useState<number>(0);
@@ -131,7 +132,7 @@ export default function Focus() {
     setShowTutorial(false);
   }, []);
 
-  // dot position stored in % to keep it responsive
+  // dot position (%)
   const [dotPos, setDotPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
 
   // Recompute phase durations from settings
@@ -146,7 +147,7 @@ export default function Focus() {
     Math.round((cycles / Math.max(1, settings.cyclesGoal)) * 100)
   );
 
-  // Dot size animation for the current phase
+  // Dot size animation per phase
   const dotScale = useMemo<{ from: number; to: number }>(() => {
     const min = settings.dotMin;
     const max = settings.dotMax;
@@ -159,14 +160,15 @@ export default function Focus() {
     return { from: min, to: min };
   }, [phaseIndex, settings.dotMin, settings.dotMax]);
 
-  // Move dot to a random safe position inside the container
+  // 📍 Keep the dot inside the big circle:
+  // we randomize polar coords within ~41% radius (the ring is ~82% of width)
   const moveDotRandom = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const padPx = 24; // keep dot inside bounds a bit
-    const x = ((Math.random() * (rect.width - padPx * 2) + padPx) / rect.width) * 100;
-    const y = ((Math.random() * (rect.height - padPx * 2) + padPx) / rect.height) * 100;
+    const MAX_R_PCT = 41;  // circle radius as % (matches ring ~82% diameter)
+    const PADDING_PCT = 6; // keep dot away from edge a bit
+    const r = Math.random() * (MAX_R_PCT - PADDING_PCT);
+    const theta = Math.random() * Math.PI * 2;
+    const x = 50 + r * Math.cos(theta);
+    const y = 50 + r * Math.sin(theta);
     setDotPos({ x, y });
   }, []);
 
@@ -180,6 +182,13 @@ export default function Focus() {
     sessionStartRef.current = null;
     setDotPos({ x: 50, y: 50 });
   }, [settings.inhale]);
+
+  // Ensure sessionStartRef is set when auto-starting
+  useEffect(() => {
+    if (running && !sessionStartRef.current) {
+      sessionStartRef.current = Date.now();
+    }
+  }, [running]);
 
   // Toggle start/stop
   const toggle = useCallback(() => {
@@ -219,7 +228,7 @@ export default function Focus() {
         // Phase complete -> advance
         setPhaseIndex((idx) => {
           const nextIdx = (idx + 1) % phases.length;
-          const justCompletedExhale = phases[idx].key === "exhale"; // end of exhale == complete breathing cycle
+          const justCompletedExhale = phases[idx].key === "exhale";
 
           if (settings.chimeOnPhaseChange) {
             playChime({ volume: settings.volume, freq: 528, duration: 0.16 });
@@ -238,7 +247,7 @@ export default function Focus() {
           return nextIdx;
         });
 
-        return 1; // will be replaced immediately
+        return 1; // replaced immediately
       });
     }, 1000);
 
@@ -256,31 +265,28 @@ export default function Focus() {
   useEffect(() => {
     if (!running) return;
     if (phaseDurations[phaseIndex] === 0) {
-      // Trigger immediate transition
       setPhaseRemaining(1);
       setPhaseIndex((idx) => (idx + 1) % phases.length);
     }
   }, [running, phaseDurations, phaseIndex]);
 
-  // Animation duration (seconds)
   const currentPhaseSeconds = Math.max(0.01, phaseDurations[phaseIndex] || 0.01);
   const progressStyle: React.CSSProperties = { width: `${progressPct}%` };
   const phaseLabel = phases[phaseIndex].label;
 
-  /* -------------------- UI -------------------- */
-
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center">
-      {/* One‑time Welcome tutorial */}
+
+      {/* One-time Welcome tutorial */}
       {showTutorial && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="max-w-lg w-full rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 p-5 shadow-xl">
             <h2 className="text-xl font-semibold mb-3">Welcome to Focus</h2>
             <ol className="space-y-2 text-sm text-slate-300 list-decimal pl-5">
-              <li><b>Press Start</b> to begin. The dot grows on <b>Inhale</b>, shrinks on <b>Exhale</b>.</li>
+              <li>The session <b>starts automatically</b>. Press <b>Pause</b> anytime.</li>
               <li>Follow the <b>label inside the dot</b> (Inhale / Hold / Exhale).</li>
-              <li>Open the <b>gear icon</b> (top‑right) to change timings, size, volume.</li>
-              <li>Each cycle the dot <b>moves</b> to keep your eyes engaged.</li>
+              <li>Open the <b>gear icon</b> (top-right) to change timings, size, volume.</li>
+              <li>The dot <b>moves inside the circle</b> each cycle to keep your eyes engaged.</li>
             </ol>
             <div className="mt-4 flex justify-end">
               <Button variant="secondary" className="bg-slate-800 border border-slate-700" onClick={dismissTutorial}>
@@ -488,7 +494,7 @@ export default function Focus() {
                 <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-800 w-[82%] aspect-square" />
               </div>
 
-              {/* Calming Dot with PHASE LABEL inside */}
+              {/* Calming Dot (center label & stays inside circle) */}
               <motion.div
                 aria-label="Calming dot"
                 role="img"
@@ -513,8 +519,8 @@ export default function Focus() {
                 </span>
               </motion.div>
 
-              {/* Caption */}
-              <div className="absolute bottom-6 w-full flex items-center justify-center text-slate-300 text-sm">
+              {/* Caption — moved to TOP of the stage */}
+              <div className="absolute top-6 w-full flex items-center justify-center text-slate-300 text-sm">
                 <p className="px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/70 backdrop-blur-sm">
                   Gently {phaseLabel.toLowerCase()}… keep your eyes on the dot
                 </p>
