@@ -16,7 +16,7 @@ import React, {
   PropsWithChildren,
 } from "react";
 import { motion } from "framer-motion";
-import { Settings, Play, Pause, RotateCcw } from "lucide-react";
+import { Settings, Play, Pause, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -108,8 +108,12 @@ type PhaseKey = typeof phases[number]["key"];
 export default function Focus() {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // ⏯️ Auto-start: start running as soon as the page loads
-  const [running, setRunning] = useState<boolean>(true);
+  // Start paused; welcome screen shows on every load
+  const [running, setRunning] = useState<boolean>(false);
+  const [showWelcome, setShowWelcome] = useState<boolean>(true);
+
+  // Sound master toggle
+  const [soundOn, setSoundOn] = useState<boolean>(true);
 
   const [settings, setSettings] = useState<SettingsState>({ ...DEFAULTS });
 
@@ -119,18 +123,6 @@ export default function Focus() {
 
   const [sessionSeconds, setSessionSeconds] = useState<number>(0);
   const sessionStartRef = useRef<number | null>(null);
-
-  // one-time tutorial
-  const [showTutorial, setShowTutorial] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const seen = localStorage.getItem("focus_tutorial_seen");
-    if (!seen) setShowTutorial(true);
-  }, []);
-  const dismissTutorial = useCallback(() => {
-    try { localStorage.setItem("focus_tutorial_seen", "1"); } catch {}
-    setShowTutorial(false);
-  }, []);
 
   // dot position (%)
   const [dotPos, setDotPos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
@@ -161,7 +153,7 @@ export default function Focus() {
   }, [phaseIndex, settings.dotMin, settings.dotMax]);
 
   // 📍 Keep the dot inside the big circle:
-  // we randomize polar coords within ~41% radius (the ring is ~82% of width)
+  // randomize polar coords within ~41% radius (the ring is ~82% of width)
   const moveDotRandom = useCallback(() => {
     const MAX_R_PCT = 41;  // circle radius as % (matches ring ~82% diameter)
     const PADDING_PCT = 6; // keep dot away from edge a bit
@@ -182,13 +174,6 @@ export default function Focus() {
     sessionStartRef.current = null;
     setDotPos({ x: 50, y: 50 });
   }, [settings.inhale]);
-
-  // Ensure sessionStartRef is set when auto-starting
-  useEffect(() => {
-    if (running && !sessionStartRef.current) {
-      sessionStartRef.current = Date.now();
-    }
-  }, [running]);
 
   // Toggle start/stop
   const toggle = useCallback(() => {
@@ -230,14 +215,14 @@ export default function Focus() {
           const nextIdx = (idx + 1) % phases.length;
           const justCompletedExhale = phases[idx].key === "exhale";
 
-          if (settings.chimeOnPhaseChange) {
+          if (settings.chimeOnPhaseChange && soundOn) {
             playChime({ volume: settings.volume, freq: 528, duration: 0.16 });
           }
 
           if (justCompletedExhale) {
             setCycles((c) => c + 1);
             moveDotRandom();
-            if (settings.chimeOnCycle) {
+            if (settings.chimeOnCycle && soundOn) {
               playChime({ volume: settings.volume, freq: 432, duration: 0.22 });
             }
           }
@@ -259,6 +244,7 @@ export default function Focus() {
     settings.chimeOnPhaseChange,
     settings.chimeOnCycle,
     settings.volume,
+    soundOn,
   ]);
 
   // If a phase duration is 0, auto-skip it while running
@@ -274,23 +260,37 @@ export default function Focus() {
   const progressStyle: React.CSSProperties = { width: `${progressPct}%` };
   const phaseLabel = phases[phaseIndex].label;
 
+  /* -------------------- UI -------------------- */
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col items-center">
 
-      {/* One-time Welcome tutorial */}
-      {showTutorial && (
+      {/* Welcome screen — always on first render until user starts */}
+      {showWelcome && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-lg w-full rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 p-5 shadow-xl">
-            <h2 className="text-xl font-semibold mb-3">Welcome to Focus</h2>
-            <ol className="space-y-2 text-sm text-slate-300 list-decimal pl-5">
-              <li>The session <b>starts automatically</b>. Press <b>Pause</b> anytime.</li>
-              <li>Follow the <b>label inside the dot</b> (Inhale / Hold / Exhale).</li>
-              <li>Open the <b>gear icon</b> (top-right) to change timings, size, volume.</li>
-              <li>The dot <b>moves inside the circle</b> each cycle to keep your eyes engaged.</li>
-            </ol>
-            <div className="mt-4 flex justify-end">
-              <Button variant="secondary" className="bg-slate-800 border border-slate-700" onClick={dismissTutorial}>
-                Got it
+          <div className="max-w-lg w-full rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 p-6 shadow-xl">
+            <h2 className="text-2xl font-semibold mb-2 text-center">Welcome to Focus</h2>
+            <p className="text-slate-300 text-sm text-center mb-4">
+              Keep your eyes on the moving dot. Breathe with the label inside it: <b>Inhale</b>, <b>Hold</b>, <b>Exhale</b>.
+              You can change timing, size and sound in the <b>gear</b> (top-right).
+            </p>
+            <ul className="text-slate-300 text-sm list-disc pl-5 space-y-1 mb-5">
+              <li>The dot moves <b>inside the circle</b> after each full breath.</li>
+              <li>Press <b>Pause</b> anytime. <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded">Space</kbd> also toggles start/pause.</li>
+              <li>Use the <b>Sound</b> toggle on the top bar to mute/unmute chimes.</li>
+            </ul>
+            <div className="flex justify-center">
+              <Button
+                size="lg"
+                className="px-6 py-2 text-base font-semibold"
+                onClick={() => {
+                  setShowWelcome(false);
+                  // Start the session
+                  if (!sessionStartRef.current) sessionStartRef.current = Date.now();
+                  setRunning(true);
+                }}
+              >
+                START — IMPROVE MY FOCUS
               </Button>
             </div>
           </div>
@@ -422,12 +422,12 @@ export default function Focus() {
               <div className="flex items-center justify-between pt-2">
                 <Button
                   variant="secondary"
-                  className="bg-slate-800 border border-slate-700"
+                  className="bg-slate-200 text-slate-900 hover:bg-slate-100 border border-slate-300"
                   onClick={() => setSettings({ ...DEFAULTS })}
                 >
                   Restore Defaults
                 </Button>
-                <Button variant="outline" className="border-slate-600" onClick={resetAll}>
+                <Button variant="destructive" onClick={resetAll}>
                   <RotateCcw className="h-4 w-4 mr-2" /> Reset Session
                 </Button>
               </div>
@@ -454,6 +454,20 @@ export default function Focus() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge label={`Session: ${fmt(sessionSeconds)}`} />
+
+                {/* Sound toggle */}
+                <Button
+                  size="sm"
+                  variant={soundOn ? "secondary" : "outline"}
+                  className={soundOn ? "bg-slate-200 text-slate-900" : ""}
+                  onClick={() => setSoundOn(v => !v)}
+                  title={soundOn ? "Sound: On" : "Sound: Off"}
+                >
+                  {soundOn ? <Volume2 className="h-4 w-4 mr-1" /> : <VolumeX className="h-4 w-4 mr-1" />}
+                  {soundOn ? "Sound On" : "Sound Off"}
+                </Button>
+
+                {/* Start/Pause */}
                 <Button size="sm" onClick={toggle} className="ml-1">
                   {running ? (
                     <span className="inline-flex items-center">
@@ -467,10 +481,11 @@ export default function Focus() {
                     </span>
                   )}
                 </Button>
+
+                {/* Reset — high contrast */}
                 <Button
                   size="sm"
-                  variant="secondary"
-                  className="bg-slate-800 border border-slate-700"
+                  variant="destructive"
                   onClick={resetAll}
                 >
                   <RotateCcw className="h-4 w-4 mr-1" />
@@ -519,7 +534,7 @@ export default function Focus() {
                 </span>
               </motion.div>
 
-              {/* Caption — moved to TOP of the stage */}
+              {/* Caption — moved to TOP */}
               <div className="absolute top-6 w-full flex items-center justify-center text-slate-300 text-sm">
                 <p className="px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/70 backdrop-blur-sm">
                   Gently {phaseLabel.toLowerCase()}… keep your eyes on the dot
